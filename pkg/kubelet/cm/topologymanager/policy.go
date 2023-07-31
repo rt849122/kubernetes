@@ -17,6 +17,9 @@ limitations under the License.
 package topologymanager
 
 import (
+	"fmt"
+	"strconv"
+
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager/bitmask"
 )
@@ -304,7 +307,7 @@ func (m HintMerger) Merge() TopologyHint {
 		// Compare the current bestHint with the candidate mergedHint and
 		// update bestHint if appropriate.
 		bestHint = m.compare(bestHint, &mergedHint)
-	})
+	}, defaultAffinity)
 
 	if bestHint == nil {
 		bestHint = &TopologyHint{defaultAffinity, false}
@@ -333,10 +336,25 @@ func (m HintMerger) Merge() TopologyHint {
 //	                providerHints[-1][z]
 //	            }
 //	            callback(permutation)
-func iterateAllProviderTopologyHints(allProviderHints [][]TopologyHint, callback func([]TopologyHint)) {
+
+func iterateAllProviderTopologyHints(allProviderHints [][]TopologyHint, callback func([]TopologyHint), mask bitmask.BitMask) {
 	// Internal helper function to accumulate the permutation before calling the callback.
 	var iterate func(i int, accum []TopologyHint)
+	memo := map[string]struct{}{}
 	iterate = func(i int, accum []TopologyHint) {
+		hint := mergePermutation(mask, accum)
+		maskStr := ""
+		if hint.NUMANodeAffinity == nil {
+			maskStr = "nil"
+		} else {
+			maskStr = hint.NUMANodeAffinity.String()
+		}
+		key := fmt.Sprintf("%d-%s-%s", i, maskStr, strconv.FormatBool(hint.Preferred))
+		if _, found := memo[key]; found {
+			return
+		} else {
+			memo[key] = struct{}{}
+		}
 		// Base case: we have looped through all providers and have a full permutation.
 		if i == len(allProviderHints) {
 			callback(accum)
